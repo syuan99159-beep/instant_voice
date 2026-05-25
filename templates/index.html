@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>經文播放器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-card">
+        <div class="hero-header">
+        <div class="hero-copy">
+          <p class="eyebrow">Flask Sutra Player</p>
+          <h1>經文播放器</h1>
+          
+        </div>
+
+        <div class="top-controls" style="display:flex; justify-content:flex-end; gap:12px; margin-top:8px;">
+          <div class="segmented-control" aria-label="字體大小切換 (全部)">
+            <button type="button" class="segment-button" data-font-size="small">小 15</button>
+            <button type="button" class="segment-button is-active" data-font-size="medium">中 20</button>
+            <button type="button" class="segment-button" data-font-size="large">大 28</button>
+          </div>
+        </div>
+        </div>
+
+        <!-- Selection view: show list of books -->
+        <div id="bookSelectionView" class="toolbar-card" aria-label="經書選單">
+          <div class="toolbar-row">
+            <div id="bookList" class="book-list"></div>
+          </div>
+        </div>
+
+        <!-- Player view: hidden until a book is selected -->
+        <div id="playerView" class="toolbar-card" aria-label="播放器面板" style="display:none;">
+          <div class="toolbar-row toolbar-row--stack">
+            <div class="player-header">
+              <button id="backToBooks" class="control-button">返回經書選單</button>
+              <div style="flex:1 1 auto; text-align:center;">
+                <h2 id="sutraTitle" class="sutra-title">未選擇經書</h2>
+              </div>
+              <label class="field" style="display:none;">
+                <select id="sutraSelect" class="select-control" aria-label="選擇經書"></select>
+              </label>
+              <div class="status-pill" aria-live="polite">
+                <span id="playbackState">尚未載入</span>
+                <span id="timeState">00:00 / 00:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="button-grid" role="group" aria-label="播放控制">
+            <button type="button" class="control-button" data-action="previous">上一句</button>
+            <button type="button" class="control-button control-button--primary" data-action="toggle-play">播放</button>
+            <button type="button" class="control-button" data-action="next">下一句</button>
+            <button type="button" class="control-button" data-action="restart">重播</button>
+            <button type="button" class="control-button" data-action="toggle-loop">循環：關</button>
+          </div>
+
+          <div class="toolbar-row toolbar-row--compact">
+            <div class="speed-group" aria-label="播放速度切換">
+              <button type="button" class="speed-button" data-speed="2">2.0</button>
+              <button type="button" class="speed-button" data-speed="1.5">1.5</button>
+              <button type="button" class="speed-button is-active" data-speed="1">1.0</button>
+              <button type="button" class="speed-button" data-speed="0.75">0.75</button>
+              <button type="button" class="speed-button" data-speed="0.5">0.5</button>
+            </div>
+
+            <div class="voice-row">
+              <button id="voiceControlButton" class="control-button" aria-pressed="false">按住說話</button>
+              <span id="voiceControlStatus" class="status-text">語音控制尚未啟用</span>
+            </div>
+          </div>
+
+          <div class="subtitle-panel" aria-label="字幕顯示區">
+            <div id="subtitleContainer" class="subtitle-stage" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Removed duplicate subtitle container (player view has its own) -->
+    </main>
+
+    <audio id="audioPlayer" preload="metadata"></audio>
+    <script>
+      window.__DEFAULT_SUTRA_ID__ = "{{ default_sutra_id }}";
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/voice_control.js') }}"></script>
+  </body>
+</html>

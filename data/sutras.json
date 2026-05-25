@@ -1,0 +1,8 @@
+[
+  {
+    "id": "heart_sutra",
+    "title": "般若波羅蜜多心經",
+    "audio": "/static/audio/heart_sutra.mp3",
+    "subtitle": "/static/subtitles/heart_sutra.json"
+  }
+]
