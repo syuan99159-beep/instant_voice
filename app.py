@@ -4,6 +4,8 @@ from functools import lru_cache
 import json
 from pathlib import Path
 from typing import Any
+import traceback
+import time
 
 from flask import Flask, jsonify, render_template, request
 import uuid
@@ -39,6 +41,9 @@ def get_whisper_model():
     except Exception:
         _WHISPER_MODEL = None
         return None
+
+
+WHISPER_MODEL = get_whisper_model()
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -145,31 +150,36 @@ def api_voice_command():
     - (預留 Whisper 辨識整合位置)
     - 回傳暫時的 mock JSON
     """
-    # 確保暫存資料夾存在
+    def error_response(message: str, status_code: int = 200, **extra: Any):
+        payload = {"success": False, "error": message}
+        if extra:
+            payload.update(extra)
+        return jsonify(payload), status_code
+
+    overall_start = time.perf_counter()
+
     try:
+        save_start = time.perf_counter()
         TEMP_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        # 若無法建立資料夾，回傳錯誤
-        return jsonify({"error": "Unable to create temp directory"}), 500
+    except Exception as exc:
+        traceback.print_exc()
+        return error_response(f"Unable to create temp directory: {exc}")
 
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+    file_storage = request.files.get('file') or request.files.get('audio')
+    if file_storage is None or not getattr(file_storage, 'filename', ''):
+        return error_response("No audio file uploaded", 400)
 
-    file_storage = request.files.get('file')
-    if file_storage.filename:
-        suffix = Path(file_storage.filename).suffix
-    else:
-        suffix = '.webm'
-
+    suffix = Path(file_storage.filename).suffix or '.webm'
     dest_name = f"{uuid.uuid4().hex}{suffix}"
     dest_path = TEMP_AUDIO_DIR / dest_name
 
     try:
         file_storage.save(dest_path)
-    except Exception:
-        return jsonify({"error": "Failed to save file"}), 500
-    # 嘗試使用 faster-whisper 進行辨識
-    model = get_whisper_model()
+        save_elapsed = time.perf_counter() - save_start
+        print(f"[voice-command] save audio: {save_elapsed:.3f}s")
+    except Exception as exc:
+        traceback.print_exc()
+        return error_response(f"Failed to save uploaded audio: {exc}")
 
     def map_text_to_command(text: str) -> str:
         if not text:
@@ -198,16 +208,30 @@ def api_voice_command():
 
     transcript_text = ""
     confidence = 0.0
+    command_parse_start = time.perf_counter()
+
+    try:
+        model = WHISPER_MODEL
+    except Exception as exc:
+        traceback.print_exc()
+        return error_response(f"Failed to access speech model: {exc}")
 
     if model is None:
         # 模型不可用，回傳 unknown 同時提示前端
         transcript_text = ""
         command = "unknown"
-        return jsonify({"text": transcript_text, "command": command, "confidence": confidence}), 200
+        command_parse_elapsed = time.perf_counter() - command_parse_start
+        overall_elapsed = time.perf_counter() - overall_start
+        print(f"[voice-command] command parse: {command_parse_elapsed:.3f}s")
+        print(f"[voice-command] total: {overall_elapsed:.3f}s")
+        return jsonify({"ok": False, "text": transcript_text, "command": command, "error": "Speech model unavailable"}), 200
 
     try:
+        whisper_start = time.perf_counter()
         # faster-whisper 支援透過 ffmpeg 自動處理多數音訊格式
-        segments, info = model.transcribe(str(dest_path), beam_size=5, language="zh", task="transcribe")
+        segments, info = model.transcribe(str(dest_path), beam_size=1, language="zh", task="transcribe")
+        whisper_elapsed = time.perf_counter() - whisper_start
+        print(f"[voice-command] whisper infer: {whisper_elapsed:.3f}s")
 
         # 合併所有段落的文字
         parts = []
@@ -244,10 +268,18 @@ def api_voice_command():
             # fallback heuristic
             confidence = 0.9 if transcript_text else 0.0
 
+        command_parse_start = time.perf_counter()
         command = map_text_to_command(transcript_text)
+        command_parse_elapsed = time.perf_counter() - command_parse_start
+        overall_elapsed = time.perf_counter() - overall_start
+        print(f"[voice-command] command parse: {command_parse_elapsed:.3f}s")
+        print(f"[voice-command] total: {overall_elapsed:.3f}s")
 
-        return jsonify({"text": transcript_text, "command": command, "confidence": round(float(confidence), 3)}), 200
+        return jsonify({"ok": True, "text": transcript_text, "command": command, "error": ""}), 200
 
     except Exception as exc:  # pragma: no cover - runtime errors handled
         # 若辨識失敗，不讓前端卡死，回傳 unknown
-        return jsonify({"text": "", "command": "unknown", "confidence": 0.0, "error": str(exc)}), 200
+        traceback.print_exc()
+        overall_elapsed = time.perf_counter() - overall_start
+        print(f"[voice-command] total: {overall_elapsed:.3f}s")
+        return error_response(str(exc), 200, ok=False, text="", command="unknown")

@@ -126,12 +126,12 @@
     };
 
     mediaRecorder.start();
-    // 15 秒自動停止以避免過長錄音
+    // 5 秒自動停止以避免過長錄音
     stopTimeoutId = setTimeout(() => {
       if (mediaRecorder && mediaRecorder.state === 'recording') {
         stopRecordingAndUpload();
       }
-    }, 15000);
+    }, 5000);
 
     setStatus('正在聆聽...');
   }
