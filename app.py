@@ -157,7 +157,7 @@ def api_voice_command():
         traceback.print_exc()
         return error_response(f"Failed to save uploaded audio: {exc}")
 
-    def map_text_to_command(text: str) -> str:
+    def parse_voice_command(text: str) -> str:
         if not text:
             return "unknown"
 
@@ -200,11 +200,12 @@ def api_voice_command():
 
         transcript_text = (getattr(transcript, "text", "") or "").strip()
         command_parse_start = time.perf_counter()
-        command = map_text_to_command(transcript_text)
+        command = parse_voice_command(transcript_text)
         command_parse_elapsed = time.perf_counter() - command_parse_start
         overall_elapsed = time.perf_counter() - overall_start
         print(f"[voice-command] command parse: {command_parse_elapsed:.3f}s")
         print(f"[voice-command] total: {overall_elapsed:.3f}s")
+        print(f"[voice-command] text={transcript_text!r} command={command!r}")
 
         return jsonify({"ok": True, "text": transcript_text, "command": command, "error": ""}), 200
 

@@ -31,33 +31,75 @@
     return false;
   }
 
-  function handleCommand(command) {
-    // 優先支援明確的函式名稱，否則模擬點擊現有按鈕
+  function isLoopEnabled() {
+    const loopBtn = document.querySelector('[data-action="toggle-loop"]');
+    if (!loopBtn) return false;
+    return (loopBtn.textContent || '').includes('開');
+  }
+
+  function setLoopState(enabled) {
+    const current = isLoopEnabled();
+    if (current === enabled) return true;
+    return tryCallFunctionOrClick('toggleLoop', '[data-action="toggle-loop"]');
+  }
+
+  const existingExecuteVoiceCommand = typeof window.executeVoiceCommand === 'function'
+    ? window.executeVoiceCommand
+    : null;
+
+  function executeVoiceCommand(command) {
+    if (existingExecuteVoiceCommand) {
+      try {
+        existingExecuteVoiceCommand(command);
+        return;
+      } catch (e) {
+        console.warn('existing executeVoiceCommand failed, fallback to local handler', e);
+      }
+    }
+
+    // Use existing player functions/buttons without changing app.js core logic.
     switch (command) {
       case 'play':
-        tryCallFunctionOrClick('playAudio', '[data-action="toggle-play"]');
+        tryCallFunctionOrClick('playCurrent', '[data-action="toggle-play"]') || tryCallFunctionOrClick('playAudio', '[data-action="toggle-play"]') || tryCallFunctionOrClick('togglePlay', '[data-action="toggle-play"]');
         break;
-      case 'pause':
-        tryCallFunctionOrClick('pauseAudio', '[data-action="toggle-play"]');
+      case 'pause': {
+        const handled = tryCallFunctionOrClick('pauseAudio', '[data-action="toggle-play"]');
+        if (!handled) {
+          const audioEl = document.getElementById('audioPlayer');
+          if (audioEl && typeof audioEl.pause === 'function') {
+            audioEl.pause();
+          }
+        }
         break;
+      }
       case 'next':
         tryCallFunctionOrClick('nextSentence', '[data-action="next"]') || tryCallFunctionOrClick('jumpToNextSentence', '[data-action="next"]');
         break;
-      case 'prev':
       case 'previous':
+      case 'prev':
         tryCallFunctionOrClick('prevSentence', '[data-action="previous"]') || tryCallFunctionOrClick('jumpToPreviousSentence', '[data-action="previous"]');
         break;
       case 'restart':
         tryCallFunctionOrClick('restartAudio', '[data-action="restart"]') || tryCallFunctionOrClick('restartPlayback', '[data-action="restart"]');
         break;
-      case 'toggleLoop':
-      case 'loop':
-        tryCallFunctionOrClick('toggleLoop', '[data-action="toggle-loop"]');
+      case 'loop_on':
+        setLoopState(true);
+        break;
+      case 'loop_off':
+        setLoopState(false);
         break;
       default:
         console.warn('Unknown voice command:', command);
         break;
     }
+  }
+
+  if (!existingExecuteVoiceCommand) {
+    window.executeVoiceCommand = executeVoiceCommand;
+  }
+
+  function handleCommand(command) {
+    executeVoiceCommand(command);
   }
 
   async function sendBlob(blob) {
@@ -78,11 +120,12 @@
         return;
       }
 
-      const payload = await resp.json();
-      setStatus(payload.text ? `已辨識：${payload.text}` : '已辨識');
+      const data = await resp.json();
+      console.log(data);
+      setStatus(data.text ? `已辨識：${data.text}` : '已辨識');
 
-      if (payload.command) {
-        handleCommand(payload.command);
+      if (data.command && data.command !== 'unknown') {
+        executeVoiceCommand(data.command);
       }
     } catch (err) {
       console.error(err);
