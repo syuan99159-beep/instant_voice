@@ -212,17 +212,21 @@
     }, { passive: false });
 
     const finish = (ev) => {
-      ev.preventDefault();
-      if (btn.classList.contains('is-recording')) {
-        btn.classList.remove('is-recording');
-        btn.setAttribute('aria-pressed', 'false');
-        stopRecordingAndUpload();
+      if (!btn.classList.contains('is-recording')) return;
+
+      // Only block default touch behavior while actively recording.
+      if (ev.type.startsWith('touch')) {
+        ev.preventDefault();
       }
+
+      btn.classList.remove('is-recording');
+      btn.setAttribute('aria-pressed', 'false');
+      stopRecordingAndUpload();
     };
 
     document.addEventListener('mouseup', finish);
-    document.addEventListener('touchend', finish);
-    document.addEventListener('touchcancel', finish);
+    document.addEventListener('touchend', finish, { passive: false });
+    document.addEventListener('touchcancel', finish, { passive: false });
 
     // 按住時也可按 Esc 中斷
     document.addEventListener('keydown', (ev) => {
