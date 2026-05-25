@@ -6,44 +6,20 @@ from pathlib import Path
 from typing import Any
 import traceback
 import time
+import os
 
 from flask import Flask, jsonify, render_template, request
 import uuid
-import math
-
-# faster-whisper optional import
-try:
-    from faster_whisper import WhisperModel
-except Exception:  # pragma: no cover - optional dependency
-    WhisperModel = None
+from openai import OpenAI
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 STATIC_DIR = BASE_DIR / "static"
 SUTRAS_FILE = DATA_DIR / "sutras.json"
 TEMP_AUDIO_DIR = BASE_DIR / "temp_audio"
-MODEL_SIZE = "tiny"  # 可改為 "base" 以提高準確度
-_WHISPER_MODEL = None
-
-
-def get_whisper_model():
-    global _WHISPER_MODEL
-    if _WHISPER_MODEL is not None:
-        return _WHISPER_MODEL
-
-    if WhisperModel is None:
-        return None
-
-    try:
-        # 載入模型到 CPU，若有 CUDA 可改為 device='cuda'
-        _WHISPER_MODEL = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
-        return _WHISPER_MODEL
-    except Exception:
-        _WHISPER_MODEL = None
-        return None
-
-
-WHISPER_MODEL = get_whisper_model()
+OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -151,7 +127,7 @@ def api_voice_command():
     - 回傳暫時的 mock JSON
     """
     def error_response(message: str, status_code: int = 200, **extra: Any):
-        payload = {"success": False, "error": message}
+        payload = {"ok": False, "text": "", "command": "unknown", "error": message}
         if extra:
             payload.update(extra)
         return jsonify(payload), status_code
@@ -206,68 +182,23 @@ def api_voice_command():
 
         return "unknown"
 
-    transcript_text = ""
-    confidence = 0.0
-    command_parse_start = time.perf_counter()
-
-    try:
-        model = WHISPER_MODEL
-    except Exception as exc:
-        traceback.print_exc()
-        return error_response(f"Failed to access speech model: {exc}")
-
-    if model is None:
-        # 模型不可用，回傳 unknown 同時提示前端
-        transcript_text = ""
-        command = "unknown"
-        command_parse_elapsed = time.perf_counter() - command_parse_start
+    if client is None:
         overall_elapsed = time.perf_counter() - overall_start
-        print(f"[voice-command] command parse: {command_parse_elapsed:.3f}s")
         print(f"[voice-command] total: {overall_elapsed:.3f}s")
-        return jsonify({"ok": False, "text": transcript_text, "command": command, "error": "Speech model unavailable"}), 200
+        return error_response("OPENAI_API_KEY is not configured")
 
     try:
-        whisper_start = time.perf_counter()
-        # faster-whisper 支援透過 ffmpeg 自動處理多數音訊格式
-        segments, info = model.transcribe(str(dest_path), beam_size=1, language="zh", task="transcribe")
-        whisper_elapsed = time.perf_counter() - whisper_start
-        print(f"[voice-command] whisper infer: {whisper_elapsed:.3f}s")
+        stt_start = time.perf_counter()
+        with dest_path.open("rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model=OPENAI_STT_MODEL,
+                file=audio_file,
+                language="zh",
+            )
+        stt_elapsed = time.perf_counter() - stt_start
+        print(f"[voice-command] openai transcribe: {stt_elapsed:.3f}s")
 
-        # 合併所有段落的文字
-        parts = []
-        confidences = []
-        for seg in segments:
-            # seg 可能是 dict 或物件
-            seg_text = getattr(seg, 'text', None) or (seg.get('text') if isinstance(seg, dict) else '')
-            parts.append(seg_text)
-
-            # 嘗試取得 avg_logprob 或 confidence
-            avg_logprob = None
-            if isinstance(seg, dict):
-                avg_logprob = seg.get('avg_logprob') or seg.get('confidence')
-            else:
-                avg_logprob = getattr(seg, 'avg_logprob', None) or getattr(seg, 'confidence', None)
-
-            if avg_logprob is not None:
-                try:
-                    avg = float(avg_logprob)
-                    confidences.append(avg)
-                except Exception:
-                    pass
-
-        transcript_text = "".join(parts).strip()
-
-        if confidences:
-            # 將 avg_logprob (可能為負) 映射到 [0,1]，使用 sigmoid
-            avg = sum(confidences) / len(confidences)
-            try:
-                confidence = float(1 / (1 + math.exp(-avg)))
-            except Exception:
-                confidence = 0.0
-        else:
-            # fallback heuristic
-            confidence = 0.9 if transcript_text else 0.0
-
+        transcript_text = (getattr(transcript, "text", "") or "").strip()
         command_parse_start = time.perf_counter()
         command = map_text_to_command(transcript_text)
         command_parse_elapsed = time.perf_counter() - command_parse_start
@@ -278,8 +209,7 @@ def api_voice_command():
         return jsonify({"ok": True, "text": transcript_text, "command": command, "error": ""}), 200
 
     except Exception as exc:  # pragma: no cover - runtime errors handled
-        # 若辨識失敗，不讓前端卡死，回傳 unknown
         traceback.print_exc()
         overall_elapsed = time.perf_counter() - overall_start
         print(f"[voice-command] total: {overall_elapsed:.3f}s")
-        return error_response(str(exc), 200, ok=False, text="", command="unknown")
+        return error_response(str(exc))
